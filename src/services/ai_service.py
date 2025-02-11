@@ -1,18 +1,18 @@
 from typing import List, Dict
 import json
 import logging
-import requests
 import os
 from dotenv import load_dotenv
+from together import Together
 
 load_dotenv()
 
 class AIService:
     def __init__(self):
         self.api_key = os.getenv('TOGETHER_API_KEY')
-        self.api_url = "https://api.together.xyz/inference"
         if not self.api_key:
             raise ValueError("TOGETHER_API_KEY non définie dans les variables d'environnement")
+        self.client = Together()
 
     async def generate_content_suggestions(self, 
                                         channel_data: Dict,
@@ -40,26 +40,25 @@ class AIService:
 
     def _get_ai_response(self, prompt: str) -> str:
         """Obtient une réponse via l'API Together.ai."""
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        data = {
-            "model": "togethercomputer/llama-2-7b-chat",
-            "prompt": f"<s>[INST] {prompt} [/INST]",
-            "max_tokens": 1000,
-            "temperature": 0.7,
-            "top_p": 0.7,
-            "top_k": 50,
-            "repetition_penalty": 1.1
-        }
-        
         try:
-            response = requests.post(self.api_url, json=data, headers=headers)
-            response.raise_for_status()
-            return response.json()['output']['choices'][0]['text']
-        except requests.exceptions.RequestException as e:
+            response = self.client.chat.completions.create(
+                model="meta-llama/Llama-3.3-70B-Instruct-Turbo",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": """Tu es un expert en analyse de contenu YouTube et en stratégie de création de contenu.
+Ta mission est d'analyser les données d'une chaîne YouTube et les opportunités de contenu identifiées pour suggérer des idées de vidéos pertinentes.
+Tu dois tenir compte du style de la chaîne, de sa taille, et des opportunités spécifiques identifiées.
+Tes suggestions doivent être précises, réalisables et alignées avec les opportunités de contenu identifiées.
+Tu dois TOUJOURS répondre en format JSON valide selon le schéma demandé."""
+                    },
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=1000
+            )
+            return response.choices[0].message.content
+        except Exception as e:
             logging.error(f"Erreur API Together: {e}")
             raise
 
@@ -67,45 +66,85 @@ class AIService:
                                 channel_data: Dict, 
                                 content_gaps: List[Dict]) -> str:
         """Crée un prompt pour la génération de suggestions."""
-        return f"""
-        Analyse cette chaîne YouTube et suggère du contenu:
+        channel_info = (
+            f"Nom: {channel_data.get('title', 'Non spécifié')}\n"
+            f"Nombre d'abonnés: {channel_data.get('subscriber_count', '0')}\n"
+            f"Description: {channel_data.get('description', 'Non spécifié')}\n"
+        )
 
-        Données de la chaîne:
-        - Nom: {channel_data.get('title')}
-        - Thèmes principaux: {', '.join(channel_data.get('main_topics', []))}
-        - Nombre d'abonnés: {channel_data.get('subscriber_count')}
+        gaps_info = "Opportunités de contenu identifiées:\n"
+        for gap in content_gaps[:5]:
+            topic = gap.get('topic', 'Non spécifié')
+            potential = gap.get('potential', 'Non spécifié')
+            competition = gap.get('competition', 'Non spécifié')
+            gaps_info += f"- Sujet: {topic}\n  Potentiel: {potential}\n  Niveau de compétition: {competition}\n"
 
-        Opportunités identifiées:
-        {json.dumps(content_gaps[:5], indent=2, ensure_ascii=False)}
+        return f"""Analyse les informations suivantes et génère des suggestions de contenu adaptées:
 
-        Génère 5 suggestions de vidéos spécifiques qui:
-        1. Correspondent au style de la chaîne
-        2. Exploitent les opportunités identifiées
-        3. Ont un potentiel de vues élevé
+DONNÉES DE LA CHAÎNE:
+{channel_info}
 
-        Réponds uniquement avec un JSON au format suivant:
-        {
-            "suggestions": [
-                {
-                    "title": "Titre suggéré",
-                    "topic": "Thème principal",
-                    "description": "Description courte",
-                    "estimated_potential": "Estimation du potentiel",
-                    "key_points": ["Point 1", "Point 2", "Point 3"]
-                }
-            ]
-        }
-        """
+ANALYSE DES OPPORTUNITÉS:
+{gaps_info}
+
+INSTRUCTIONS:
+1. Génère exactement 5 suggestions de vidéos
+2. Chaque suggestion doit exploiter une des opportunités identifiées
+3. Les suggestions doivent correspondre au style et à la taille de la chaîne
+4. Le format des titres doit être accrocheur et optimisé pour YouTube
+5. Les points clés doivent être spécifiques et actionables
+
+Réponds UNIQUEMENT avec un JSON valide au format suivant, sans texte avant ou après:
+
+{{
+    "suggestions": [
+        {{
+            "title": "Titre accrocheur de la vidéo",
+            "topic": "Opportunité exploitée",
+            "description": "Description courte et engageante",
+            "estimated_potential": "Estimation du potentiel de vues",
+            "key_points": ["Point clé 1", "Point clé 2", "Point clé 3"]
+        }}
+    ]
+}}"""
 
     def _parse_ai_suggestions(self, response: str) -> List[Dict]:
         """Parse la réponse de l'IA en suggestions structurées."""
         try:
-            # Nettoyer la réponse pour extraire uniquement le JSON
-            json_str = self._extract_json(response)
+            # Nettoyer la réponse pour ne garder que le JSON
+            json_str = response.strip()
+            if "```json" in json_str:
+                json_str = json_str.split("```json")[1].split("```")[0]
+            elif "```" in json_str:
+                json_str = json_str.split("```")[1].split("```")[0]
+            
+            # Parser le JSON
             data = json.loads(json_str)
-            return data.get('suggestions', [])
-        except json.JSONDecodeError:
-            logging.error("Erreur de parsing de la réponse AI")
+            
+            # Vérifier la structure
+            if not isinstance(data, dict) or 'suggestions' not in data:
+                return []
+                
+            # Valider et nettoyer chaque suggestion
+            suggestions = []
+            for suggestion in data['suggestions']:
+                if isinstance(suggestion, dict):
+                    cleaned_suggestion = {
+                        'title': str(suggestion.get('title', '')),
+                        'topic': str(suggestion.get('topic', '')),
+                        'description': str(suggestion.get('description', '')),
+                        'estimated_potential': str(suggestion.get('estimated_potential', '')),
+                        'key_points': [str(point) for point in suggestion.get('key_points', [])]
+                    }
+                    suggestions.append(cleaned_suggestion)
+                    
+            return suggestions
+            
+        except json.JSONDecodeError as e:
+            logging.error(f"Erreur de parsing JSON: {e}")
+            return []
+        except Exception as e:
+            logging.error(f"Erreur lors du parsing des suggestions: {e}")
             return []
 
     def _create_competition_prompt(self, 

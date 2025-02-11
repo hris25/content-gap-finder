@@ -1,26 +1,34 @@
 <!DOCTYPE html>
 <html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Content Gap Finder</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/css/style.css') }}">
-</head>
-<body>
-    <header>
-        <nav>
-            <h1>Content Gap Finder</h1>
-        </nav>
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/style.css') }}" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <header class="main-header">
+      <nav class="nav-container">
+        <div class="logo">
+          <i class="fas fa-chart-line"></i>
+          <h1>Content Gap Finder</h1>
+        </div>
+      </nav>
     </header>
-    
-    <main>
-        {% block content %}{% endblock %}
+
+    <main class="main-content">
+      {% block content %}{% endblock %}
     </main>
 
-    <footer>
+    <footer class="main-footer">
+      <div class="footer-content">
         <p>&copy; 2024 Content Gap Finder</p>
+        <p>Propulsé par l'intelligence artificielle</p>
+      </div>
     </footer>
-    
+
     <script src="{{ url_for('static', path='/js/main.js') }}"></script>
-</body>
+  </body>
 </html>
